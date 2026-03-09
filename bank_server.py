@@ -1,4 +1,4 @@
-# bank_server.py
+# server
 import socket
 from bank import Bank, Customer
 

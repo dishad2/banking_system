@@ -1,4 +1,4 @@
-# atm_client.py
+# client
 import socket
 
 HOST, PORT = "127.0.0.1", 5000
