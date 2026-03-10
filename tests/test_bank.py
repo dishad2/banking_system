@@ -25,3 +25,19 @@ def test_invalid_pin_and_insufficient_and_close(tmp_path):
     assert bank.get_balance(acc, "0000") == "Invalid PIN"
     assert bank.withdraw(acc, "9999", 100.0) == "Insufficient Balance"
     assert bank.close_account(acc, "9999") == "Closed"
+
+def test_validation_errors(tmp_path):
+    bank = mk_bank(tmp_path)
+
+    # Aadhaar invalid
+    import pytest
+    with pytest.raises(ValueError, match="Aadhaar"):
+        Customer("X", "123", "9876543210")
+
+    # Contact invalid
+    with pytest.raises(ValueError, match="Contact"):
+        Customer("X", "111122223333", "12345")
+
+    # PIN invalid
+    with pytest.raises(ValueError, match="PIN"):
+        bank.create_account(Customer("Y", "111122223333", "9876543210"), pin="12", initial=0)
