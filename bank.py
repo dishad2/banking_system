@@ -1,12 +1,9 @@
-# bank_core.py
+# bank.py
 from abc import ABC, abstractmethod
 from pathlib import Path
 import threading
 import pandas as pd
 
-# --------------------------
-# Configuration & Constants
-# --------------------------
 DEFAULT_FILE = Path("BankOps.xlsx")
 SHEET = "accounts"
 
@@ -16,9 +13,7 @@ CONTACT_LEN = 10
 ACC_MIN_LEN = 4
 VALID_ACCOUNT_TYPES = {"SAVINGS", "CURRENT"}
 
-# --------------------------
-# Validation Helpers
-# --------------------------
+
 def is_digits(value: str, length: int = None, min_len: int = None, max_len: int = None) -> bool:
     if value is None:
         return False
@@ -58,9 +53,7 @@ def must_be_amount(value: str | float, positive_only=True, allow_zero=True):
         raise ValueError("Amount must be > 0.")
     return amt
 
-# --------------------------
-# Domain Model
-# --------------------------
+
 class Customer:
     def __init__(self, name, address, aadhar, contact):
         must_be_nonempty(name, "Name")
@@ -74,6 +67,7 @@ class Customer:
 
     def __repr__(self):
         return f"Customer(name={self.name}, aadhar={self.aadhar}, contact={self.contact})"
+
 
 class BaseAccount(ABC):
     def __init__(self, acc_no, name, balance, pin, status="active", atype="SAVINGS"):
@@ -107,6 +101,7 @@ class BaseAccount(ABC):
         self.status = "closed"
         return "Closed"
 
+
 class SavingsAccount(BaseAccount):
     def withdraw(self, pin, amount):
         amt = must_be_amount(amount, positive_only=True, allow_zero=False)
@@ -119,9 +114,7 @@ class SavingsAccount(BaseAccount):
         self.balance -= float(amt)
         return self.balance
 
-# --------------------------
-# Bank (Persistence + Ops)
-# --------------------------
+
 class Bank:
     def __init__(self, file_path=DEFAULT_FILE):
         self.file_path = Path(file_path)
@@ -160,7 +153,22 @@ class Bank:
             atype=row.get("type", "SAVINGS"),
         )
 
-    # --- Public Ops ---
+    # ---------- existence helpers ----------
+    def account_exists(self, acc_no: int) -> bool:
+        try:
+            acc_no = int(acc_no)
+        except Exception:
+            return False
+        df = self._read_df()
+        if df.empty:
+            return False
+        return not df.loc[df["acc_no"] == acc_no].empty
+
+    def require_account(self, acc_no: int):
+        if not self.account_exists(acc_no):
+            raise ValueError("Account does not exist.")
+
+    # ---------- public operations ----------
     def create_account(self, customer: Customer, pin: str, initial=0.0, account_type="SAVINGS"):
         pin_str = str(pin).strip()
         must_be_digits(pin_str, "PIN", length=PIN_LEN)
@@ -194,14 +202,21 @@ class Bank:
             return None, df
         return self._make_account(row.iloc[0]), df
 
-    def deposit(self, acc_no, amount):
+    def deposit(self, acc_no, pin, amount):
+        # Validate formats
         must_be_digits(str(acc_no), "Account Number", min_len=ACC_MIN_LEN)
+        must_be_digits(str(pin), "PIN", length=PIN_LEN)
         amt = must_be_amount(amount, positive_only=True, allow_zero=False)
+
+        # Load and validate business state
         account, df = self._load_account(int(acc_no))
         if account is None:
-            raise ValueError("Account not found.")
+            return "Account not found"
         if not account.is_active():
-            raise ValueError("Account not active.")
+            return "Account not active"
+        if not account.check_pin(pin):
+            return "Invalid PIN"
+
         new_bal = account.deposit(amt)
         df.loc[df["acc_no"] == account.acc_no, "balance"] = float(new_bal)
         self._write_df(df)

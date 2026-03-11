@@ -1,4 +1,4 @@
-# atm_client.py
+# atmclient.py
 import socket
 
 HOST, PORT = "127.0.0.1", 5000
@@ -18,17 +18,56 @@ def is_digits(value: str, length: int = None, min_len: int = None) -> bool:
         return False
     return True
 
-def read_account_no(prompt="Enter Account Number: "):
+def send_req(msg: str) -> str:
+    s = socket.socket()
+    try:
+        s.connect((HOST, PORT))
+        s.send(msg.encode())
+        resp = s.recv(4096).decode()
+        return resp
+    except Exception as e:
+        return f"Error: {e}"
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+def server_account_exists(acc_no: str) -> bool:
+    """
+    'Invalid PIN' => account exists.
+    A numeric balance (if pin=0000 by chance) => exists.
+    Everything else => doesn't exist.
+    """
+    if not is_digits(acc_no, min_len=ACC_MIN_LEN):
+        return False
+    resp = send_req(f"BALANCE|{acc_no}|0000")  # dummy PIN
+    if resp.strip() == "Invalid PIN":
+        return True
+    try:
+        float(resp.strip())
+        return True
+    except Exception:
+        return False
+
+def read_account_no(prompt="Enter Account Number (or 'q' to cancel): "):
     while True:
         acc = input(prompt).strip()
+        if acc.lower() == 'q':
+            return None
         if not is_digits(acc, min_len=ACC_MIN_LEN):
             print(f"Error: Account number must be digits (≥{ACC_MIN_LEN} digits). Try again.")
             continue
+        if not server_account_exists(acc):
+            print("Error: Account does not exist. Please enter a valid Account Number or 'q' to cancel.")
+            continue
         return acc
 
-def read_pin(prompt="Enter PIN (4 digits): "):
+def read_pin(prompt="Enter PIN (4 digits, or 'q' to cancel): "):
     while True:
         pin = input(prompt).strip()
+        if pin.lower() == 'q':
+            return None
         if not is_digits(pin, length=PIN_LEN):
             print("Error: PIN must be exactly 4 digits. Try again.")
             continue
@@ -52,27 +91,18 @@ def read_amount(prompt="Enter Amount: ", allow_zero=False):
                 continue
         return amt
 
-def send_req(msg: str) -> str:
-    s = socket.socket()
-    try:
-        s.connect((HOST, PORT))
-        s.send(msg.encode())
-        resp = s.recv(4096).decode()
-        return resp
-    except Exception as e:
-        return f"Error: {e}"
-    finally:
-        try:
-            s.close()
-        except Exception:
-            pass
-
 def atm_session():
     print("\nWelcome to the ATM")
     acc = read_account_no()
+    if acc is None:
+        print("Cancelled.")
+        return
     pin = read_pin()
+    if pin is None:
+        print("Cancelled.")
+        return
 
-    # Verify login silently using BALANCE
+    # Verify credentials (silent)
     res = send_req(f"BALANCE|{acc}|{pin}")
     if res.startswith("Error:") or res in ("Account not found", "Invalid PIN"):
         print(f"Login failed: {res}")
@@ -92,7 +122,8 @@ def atm_session():
 
         elif ch == "2":
             amt = read_amount("Deposit Amount: ", allow_zero=False)
-            print(send_req(f"DEPOSIT|{acc}|{amt}"))
+            # DEPOSIT now includes PIN to authenticate
+            print(send_req(f"DEPOSIT|{acc}|{pin}|{amt}"))
 
         elif ch == "3":
             print(send_req(f"BALANCE|{acc}|{pin}"))
